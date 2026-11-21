@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from html import unescape
+import os
 import re
 
 from .filtering import INTERN_MARKER, SUMMER_MARKER, clean_title, location_evidence, title_category
@@ -26,6 +27,11 @@ from .models import Job, normalize_space
 ACCEPT = "ACCEPT"
 REVIEW = "REVIEW"
 REJECT = "REJECT"
+
+# Set REQUIRE_SPONSORSHIP=true only if you need visa sponsorship to work in the US.
+# Left false, a US posting that states it does not sponsor stays eligible instead of
+# being rejected outright.
+REQUIRE_SPONSORSHIP = os.getenv("REQUIRE_SPONSORSHIP", "false").strip().casefold() in {"1", "true", "yes", "on"}
 
 MONTHS = {
     name: index
@@ -692,15 +698,16 @@ def classify(
     if evidence.waterloo and not evidence.gta:
         result.location_note = "Waterloo Region (not GTA)"
     location_label = job.location or "no location"
+    sponsorship_text = "\n".join(filter(None, (job.sponsorship_hint, text)))
     if "CA" in countries:
         result._flag(ACCEPT, f"Canada ({'GTA' if evidence.gta else location_label})")
         authorization = CANADA_AUTHORIZATION.search(text) if text else None
         if authorization:
             result.quotes.append(quote(text, authorization.start(), authorization.end()))
-    elif (sponsorship_text := "\n".join(filter(None, (job.sponsorship_hint, text)))) and (
+    elif REQUIRE_SPONSORSHIP and sponsorship_text and (
         denied := US_SPONSORSHIP_DENIED.search(sponsorship_text)
     ):
-        # Any non-Canadian role (US or unstated location) that denies sponsorship is out.
+        # Only rejected when sponsorship is actually needed; see REQUIRE_SPONSORSHIP above.
         result._flag(REJECT, "Role without visa sponsorship / citizenship required", quote(sponsorship_text, denied.start(), denied.end()))
         return result
     elif "US" in countries:

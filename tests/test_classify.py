@@ -1,7 +1,13 @@
 from datetime import date
 import unittest
+from unittest import mock
 
+from apm_notifier import classify as classify_module
 from apm_notifier.classify import ACCEPT, REJECT, REVIEW, classify, detect_term, evaluate_graduation
+
+# These cases describe the behaviour when the candidate NEEDS visa sponsorship.
+# This fork defaults REQUIRE_SPONSORSHIP to false, so they switch it on explicitly.
+requires_sponsorship = mock.patch.object(classify_module, "REQUIRE_SPONSORSHIP", True)
 from apm_notifier.models import Job
 
 
@@ -55,6 +61,7 @@ class RequiredClassifierCases(unittest.TestCase):
         self.assertTrue(result.reason.startswith("Graduation year"))
         self.assertIn("December 2026 and June 2027", " ".join(result.quotes))
 
+    @requires_sponsorship
     def test_us_onsite_without_sponsorship_is_rejected(self) -> None:
         job = posting(
             "Product Manager Intern - Summer 2027",
@@ -174,6 +181,7 @@ class AdditionalClassifierCases(unittest.TestCase):
         )
         self.assertEqual(part_time.decision, REJECT)
 
+    @requires_sponsorship
     def test_citizenship_requirement_and_cpt_support(self) -> None:
         citizen = classify(posting("Product Manager Intern 2027", "Austin, TX", PM_DUTIES + "Must be a U.S. citizen."), TODAY)
         self.assertEqual(citizen.decision, REJECT)
@@ -233,6 +241,7 @@ if __name__ == "__main__":
 class SponsorshipDenialPhrasings(unittest.TestCase):
     BASE = PM_DUTIES + "Requirements:\n- Pursuing a Bachelor's degree, graduating in 2028.\n- "
 
+    @requires_sponsorship
     def test_common_denials_are_rejected(self) -> None:
         for phrase in (
             "We will not sponsor applicants for work visas.",
@@ -249,6 +258,7 @@ class SponsorshipDenialPhrasings(unittest.TestCase):
         result = classify(posting("Product Manager Intern 2027", "New York, NY", self.BASE + "We will provide visa sponsorship."), TODAY)
         self.assertNotEqual(result.decision, REJECT)
 
+    @requires_sponsorship
     def test_denial_with_unstated_location_is_rejected(self) -> None:
         result = classify(posting("Product Manager Intern 2027", "", self.BASE + "Must be a U.S. citizen."), TODAY)
         self.assertEqual(result.decision, REJECT)

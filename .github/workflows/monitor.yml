@@ -2,8 +2,8 @@ name: APM Notifier
 
 on:
   schedule:
-    # Hourly backup; Cloudflare dispatches the primary check every five minutes.
-    - cron: "27 * * * *"
+    # Once a day at 11:00 UTC (6:00am ET), ahead of the 7:46am ET sheet scan.
+    - cron: "0 11 * * *"
   workflow_dispatch:
     inputs:
       send_test_notification:
@@ -18,7 +18,7 @@ on:
         default: false
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ${{ inputs.show_tiktok_history && 'apm-notifier-history' || 'apm-notifier' }}
@@ -37,6 +37,7 @@ jobs:
       CHECK_INTERVAL_SECONDS: "300"
       REQUEST_TIMEOUT_SECONDS: "25"
       REQUEST_CONCURRENCY: "8"
+      REQUIRE_SPONSORSHIP: "false"
       TARGET_YEAR: "2027"
       GRADUATION_YEAR: "2028"
       GRADUATION_MONTH: "4"
@@ -66,10 +67,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -z "${TELEGRAM_BOT_TOKEN}" || -z "${TELEGRAM_CHAT_ID}" ]]; then
-            echo "Required Telegram secrets are not configured."
-            exit 1
-          fi
           mkdir -p data
           python3 --version
           google-chrome --version
@@ -85,16 +82,22 @@ jobs:
         if: ${{ !inputs.show_tiktok_history }}
         run: python3 -m apm_notifier run --once
 
-      - name: Upload current matches (job_matches.csv / .json)
+      - name: Publish current matches to results/
         if: ${{ always() && !inputs.show_tiktok_history }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: job-matches
-          path: |
-            data/job_matches.csv
-            data/job_matches.json
-          if-no-files-found: ignore
-          retention-days: 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p results
+          cp -f data/job_matches.csv results/job_matches.csv 2>/dev/null || true
+          cp -f data/job_matches.json results/job_matches.json 2>/dev/null || true
+          # Written every run, so the commit below always lands and the 60-day
+          # scheduled-workflow inactivity timer never expires.
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > results/last_run.txt
+          git config user.name "apm-notifier"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A results
+          git commit -m "Update job matches $(date -u +%Y-%m-%d)" || echo "Nothing to commit."
+          git push
 
       - name: Send requested cloud test notification
         if: ${{ inputs.send_test_notification && !inputs.show_tiktok_history }}
